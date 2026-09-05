@@ -17,7 +17,9 @@ Target: PM2.5 concentration one hour ahead
 Train–test structure
 
 Training: March 2013 – August 2016
+
 Testing: September 2016 – February 2017
+
 Test data occurs entirely after the training period
 
 This is a time-series forecasting problem rather than a conventional random regression problem, the test set represents the future, randomly splitting observations into train and validation sets could leak future information into model training.
