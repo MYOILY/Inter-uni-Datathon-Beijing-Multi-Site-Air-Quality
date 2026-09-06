@@ -1,10 +1,13 @@
 """
-Fixed non-recursive model with:
-1. Extreme value handling (quantile regression)
-2. Station-specific bias correction
-3. Better extreme PM2.5 features
-4. Distribution shift adaptation
+Hybrid non-recursive / recursive-history model:
+1. Model A: weather-only LightGBM (test-available sensors)
+2. Model B: weather + PM2.5 history (train uses true current_PM2_5; test uses
+   the last train hour then the model's own previous predictions)
+3. Station-specific bias correction and a light distribution-shift term
+4. Boost on predicted extremes (>150)
 """
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -12,15 +15,26 @@ from sklearn.metrics import mean_squared_error
 import warnings
 warnings.filterwarnings('ignore')
 
+ROOT = Path(__file__).resolve().parent
+DATA = ROOT / 'data'
+
 print("="*80)
 print("IMPROVED NON-RECURSIVE PM2.5 PREDICTION")
 print("="*80)
 
 # Load data
 print("\n[1/7] Loading data...")
-train = pd.read_csv('train.csv')
-test = pd.read_csv('test(1).csv')
-online = pd.read_csv('online.csv')
+train_path = DATA / 'train_cleaned.csv'
+test_path = DATA / 'test_cleaned.csv'
+if not train_path.exists() or not test_path.exists():
+    raise FileNotFoundError(
+        'Missing data/train_cleaned.csv or data/test_cleaned.csv. Run Data Cleaning.ipynb first.'
+    )
+print(f"  Files: {train_path.name}, {test_path.name}")
+train = pd.read_csv(train_path)
+test = pd.read_csv(test_path)
+if 'current_PM2_5' in test.columns:
+    test = test.drop(columns=['current_PM2_5'])
 
 print(f"  Train: {len(train):,} rows")
 print(f"  Test: {len(test):,} rows")
@@ -336,34 +350,36 @@ submission = pd.DataFrame({
     'id': test_ids,
     'PM2_5_next_hour': predictions
 })
+# Restore official test id order
+submission = pd.read_csv(test_path, usecols=['id']).merge(submission, on='id', how='left')
 
-online_labels = online[['id', 'PM2_5_next_hour']].rename(columns={'PM2_5_next_hour': 'actual'})
-results = submission.merge(online_labels, on='id', how='left')
-valid_results = results.dropna(subset=['actual'])
+online_path = DATA / 'online.csv' if (DATA / 'online.csv').exists() else ROOT / 'online.csv'
+if online_path.exists():
+    online = pd.read_csv(online_path)
+    online_labels = online[['id', 'PM2_5_next_hour']].rename(columns={'PM2_5_next_hour': 'actual'})
+    results = submission.merge(online_labels, on='id', how='left')
+    valid_results = results.dropna(subset=['actual'])
+    rmse = np.sqrt(mean_squared_error(valid_results['actual'], valid_results['PM2_5_next_hour']))
+    mae = np.mean(np.abs(valid_results['actual'] - valid_results['PM2_5_next_hour']))
+    print("\n" + "="*80)
+    print("RESULTS (online.csv, post-inference labels only)")
+    print("="*80)
+    print(f"RMSE: {rmse:.4f}")
+    print(f"MAE:  {mae:.4f}")
+    print("="*80)
+    print("\nPer-station RMSE:")
+    for station in test['station'].unique():
+        station_results = results[results['id'].isin(
+            test[test['station'] == station]['id']
+        )].dropna(subset=['actual'])
+        if len(station_results) > 0:
+            station_rmse = np.sqrt(mean_squared_error(
+                station_results['actual'],
+                station_results['PM2_5_next_hour']
+            ))
+            print(f"  {station:20s}: {station_rmse:.2f}")
+else:
+    print("\nNo online.csv present — skipped local label scoring.")
 
-rmse = np.sqrt(mean_squared_error(valid_results['actual'], valid_results['PM2_5_next_hour']))
-mae = np.mean(np.abs(valid_results['actual'] - valid_results['PM2_5_next_hour']))
-
-print("\n" + "="*80)
-print("RESULTS")
-print("="*80)
-print(f"RMSE: {rmse:.4f}")
-print(f"MAE:  {mae:.4f}")
-print("="*80)
-
-# Per-station
-print("\nPer-station RMSE:")
-for station in test['station'].unique():
-    station_results = results[results['id'].isin(
-        test[test['station'] == station]['id']
-    )].dropna(subset=['actual'])
-    
-    if len(station_results) > 0:
-        station_rmse = np.sqrt(mean_squared_error(
-            station_results['actual'],
-            station_results['PM2_5_next_hour']
-        ))
-        print(f"  {station:20s}: {station_rmse:.2f}")
-
-submission.to_csv('submission_fixed.csv', index=False)
-print("\n✓ Saved to: submission_fixed.csv")
+submission.to_csv(ROOT / 'submission_fixed.csv', index=False)
+print("\nSaved", ROOT / 'submission_fixed.csv')

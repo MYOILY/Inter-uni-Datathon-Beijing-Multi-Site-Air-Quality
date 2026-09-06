@@ -8,7 +8,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-ROOT_DEFAULT = # put path in
+ROOT = Path(__file__).resolve().parent
+ROOT_DEFAULT = ROOT / 'data'
 LAGS = (1, 2, 3, 6, 12, 24)
 ONE_HOUR_NS = 3_600_000_000_000  # 1 hour in nanoseconds
 WIND_DEGREES = {
@@ -268,18 +269,29 @@ def recursive_predict(
     return preds_df, bridge_rows
 
 
+def _resolve_csv(data_dir: Path, name: str) -> Path:
+    path = data_dir / name
+    if not path.exists():
+        raise FileNotFoundError(
+            f'Missing {path}. Run Data Cleaning.ipynb to write data/train_cleaned.csv and data/test_cleaned.csv.'
+        )
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', type=Path, default=ROOT_DEFAULT)
-    parser.add_argument('--output-dir', type=Path, default=Path('recursive_lightgbm_output'))
+    parser.add_argument('--output-dir', type=Path, default=ROOT / 'recursive_lightgbm_output')
     args = parser.parse_args()
     data_dir, out = args.data_dir, args.output_dir
     out.mkdir(parents=True, exist_ok=True)
-    raw_train = pd.read_csv(data_dir / 'train.csv')
-    raw_test = pd.read_csv(data_dir / 'test(1).csv')
-    print('Loaded input data', flush=True)
+    train_path = _resolve_csv(data_dir, 'train_cleaned.csv')
+    test_path = _resolve_csv(data_dir, 'test_cleaned.csv')
+    raw_train = pd.read_csv(train_path)
+    raw_test = pd.read_csv(test_path)
+    print('Loaded', train_path, 'and', test_path, flush=True)
     if 'current_PM2_5' in raw_test.columns:
-        raise ValueError('Expected the bare official schema test(1).csv without current_PM2_5.')
+        raw_test = raw_test.drop(columns=['current_PM2_5'])
     stations = sorted(raw_train.station.unique())
     train, test = canonicalize(raw_train, stations), canonicalize(raw_test, stations)
     if train.duplicated(['station', 'timestamp']).any() or test.duplicated(['station', 'timestamp']).any():
@@ -293,29 +305,51 @@ def main() -> None:
     if len(original_order) != len(raw_test) or original_order.PM2_5_next_hour.isna().any() or (original_order.PM2_5_next_hour < 0).any():
         raise ValueError('Submission validation failed.')
     original_order.to_csv(out / 'submission_recursive_lightgbm.csv', index=False)
+    original_order.to_csv(ROOT / 'submission.csv', index=False)
     preds.to_csv(out / 'recursive_predictions_with_state.csv', index=False)
     model.save_model(str(out / 'recursive_lightgbm_model.txt'))
 
-    # Strictly post-inference evaluation: labels only, joined by official IDs.
-    online = pd.read_csv(data_dir / 'online.csv', usecols=['id', 'PM2_5_next_hour'])
-    print('Scoring against online labels', flush=True)
-    truth = online.drop_duplicates('id').rename(columns={'PM2_5_next_hour': 'actual_next_hour'})
-    scored = preds.merge(truth, on='id', how='left', validate='one_to_one')
-    valid = scored.dropna(subset=['actual_next_hour'])
-    rmse = float(np.sqrt(np.mean((valid.PM2_5_next_hour - valid.actual_next_hour) ** 2)))
-    mae = float(np.mean(np.abs(valid.PM2_5_next_hour - valid.actual_next_hour)))
-    scored['squared_error'] = (scored.PM2_5_next_hour - scored.actual_next_hour) ** 2
-    scored.to_csv(out / 'recursive_online_validation_predictions.csv', index=False)
     metrics = {
-        'metric': 'RMSE', 'rmse': rmse, 'mae_diagnostic': mae,
-        'scored_rows': int(len(valid)), 'unscored_rows_missing_online_label': int(len(scored) - len(valid)),
-        'submission_rows': int(len(original_order)), 'recursive_gap_bridge_rows': int(bridge_rows),
-        'training_rows': int(len(train)), 'test_file': 'test(1).csv',
-        'online_usage': 'labels only after recursive inference; excluded from fitting and state updates',
+        'metric': 'RMSE',
+        'submission_rows': int(len(original_order)),
+        'recursive_gap_bridge_rows': int(bridge_rows),
+        'training_rows': int(len(train)),
+        'test_file': test_path.name,
         'feature_count': len(features),
+        'seed': 42,
+        'num_boost_round': 900,
+        'learning_rate': 0.035,
+        'num_leaves': 63,
+        'target': 'PM2_5_next_hour - current_PM2_5 (delta), added back at inference',
     }
+
+    # Optional local scoring only. Never used to fit or to update recursive state.
+    online_path = data_dir / 'online.csv'
+    if not online_path.exists():
+        online_path = ROOT / 'online.csv'
+    if online_path.exists():
+        print('Scoring against online labels (post-inference only)', flush=True)
+        online = pd.read_csv(online_path, usecols=['id', 'PM2_5_next_hour'])
+        truth = online.drop_duplicates('id').rename(columns={'PM2_5_next_hour': 'actual_next_hour'})
+        scored = preds.merge(truth, on='id', how='left', validate='one_to_one')
+        valid = scored.dropna(subset=['actual_next_hour'])
+        rmse = float(np.sqrt(np.mean((valid.PM2_5_next_hour - valid.actual_next_hour) ** 2)))
+        mae = float(np.mean(np.abs(valid.PM2_5_next_hour - valid.actual_next_hour)))
+        scored['squared_error'] = (scored.PM2_5_next_hour - scored.actual_next_hour) ** 2
+        scored.to_csv(out / 'recursive_online_validation_predictions.csv', index=False)
+        metrics.update({
+            'rmse': rmse,
+            'mae_diagnostic': mae,
+            'scored_rows': int(len(valid)),
+            'unscored_rows_missing_online_label': int(len(scored) - len(valid)),
+            'online_usage': 'labels only after recursive inference; excluded from fitting and state updates',
+        })
+    else:
+        metrics['online_usage'] = 'online.csv not present; submission written without local label scoring'
+
     (out / 'metrics.json').write_text(json.dumps(metrics, indent=2) + '\n')
     print(json.dumps(metrics, indent=2))
+    print('Wrote', ROOT / 'submission.csv')
 
 
 if __name__ == '__main__':

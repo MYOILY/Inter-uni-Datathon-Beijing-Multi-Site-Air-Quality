@@ -2,105 +2,114 @@
 
 Inter-university datathon: forecast **next-hour PM2.5** (`PM2_5_next_hour`) at 12 Beijing stations. Metric: **RMSE**.
 
-Train: 1 Mar 2013 – 31 Aug 2016 (360,954 rows). Test: 31 Aug 2016 23:00 – 28 Feb 2017 (51,063 rows). Chronological forecast — the test window is entirely after train.
+Train: 1 Mar 2013 – 31 Aug 2016. Test: 31 Aug 2016 23:00 – 28 Feb 2017. Chronological forecast — the test window is entirely after train.
 
 **Protocol:** `current_PM2_5` is in **train only**. Test does not include it. Persistence using true current PM2.5 is not a valid submission.
+
+The production approach is in **`temp.py`**: LightGBM predicts the one-hour **delta**, then each station is walked forward so the previous prediction becomes the next hour’s current PM2.5. **`fixed_model.py`** is the comparison hybrid (weather-only model + recursive-history model).
 
 ---
 
 ## README / reproduction instructions
 
-These steps regenerate the modelling pipeline. The file we uploaded to the leaderboard is the existing **`submission.csv`** at the repo root. Retraining can move predictions slightly (LightGBM + `n_jobs=-1`).
+The leaderboard file is **`submission.csv`** at the repo root, written by `temp.py`. Retraining can move predictions slightly (LightGBM).
 
 ### Required files
 
 | Path | Role |
 | --- | --- |
-| `data/train.csv` | Official train table |
-| `data/test.csv` | Official test table (no `current_PM2_5`, no target) |
-| `feature_engineering.py` | Gap-filling, stage-1 PM2.5 proxy, stage-2 features |
-| `train_and_submit.py` | Validation, training, inference, writes `submission.csv` |
+| `data/train.csv`, `data/test.csv` | Official competition tables |
+| `Data Cleaning.ipynb` | Writes `data/train_cleaned.csv` and `data/test_cleaned.csv` |
+| `data/train_cleaned.csv`, `data/test_cleaned.csv` | Tables used by EDA and modelling |
+| `temp.py` | **Primary pipeline** — train, recursive inference, writes `submission.csv` |
+| `fixed_model.py` | Optional comparison — writes `submission_fixed.csv` |
+| `Modelling.ipynb` | Methodology report |
 | `requirements.txt` | Python packages |
-| `02_Modelling.ipynb` | Methodology report (required notebook) |
 
-Optional (not required to rebuild predictions): `01_EDA.ipynb`, `Data Cleaning.ipynb`.
+Optional: `EDA.ipynb` (uses the cleaned tables).
 
 ### Execution order
 
 ```bash
 python -m pip install -r requirements.txt
-python train_and_submit.py
 ```
 
 1. Install packages (Python **3.11**).
-2. Confirm `data/train.csv` and `data/test.csv` are present.
-3. Run **`python train_and_submit.py`** from the repo root.
-4. That script: loads the official CSVs → `interpolate_then_mean_fill` → stage-1/stage-2 features → winter validation → fits the locked ensemble on all train → writes the prediction file.
+2. Official `data/train.csv` and `data/test.csv` present.
+3. Run **`Data Cleaning.ipynb`** (writes `data/train_cleaned.csv` and `data/test_cleaned.csv`). `current_PM2_5` is filled on train only.
+4. From the repo root run **`python temp.py`** (requires the cleaned CSVs).
+5. That script fits LightGBM on the PM2.5 delta, walks each station through test, restores official test `id` order, and writes `submission.csv`.
 
-**Do not run `Data Cleaning.ipynb` as part of reproduction.** It is missing-value EDA. Production gap-filling is inside `feature_engineering.interpolate_then_mean_fill`.
+Optional comparison (does not overwrite `submission.csv`):
 
-To rebuild from the methodology notebook instead: open `02_Modelling.ipynb`, set `RETRAIN = True`, run all cells.
+```bash
+python fixed_model.py
+```
+
+That writes `submission_fixed.csv`.
+
+To rebuild from the methodology notebook: open `Modelling.ipynb`, set `RETRAIN = True`, run all cells. The notebook also reads the cleaned CSVs.
+
+CLI overrides for `temp.py`: `--data-dir` (default `data/`), `--output-dir` (default `recursive_lightgbm_output/`).
 
 ### Which script generates the prediction file
 
-**`train_and_submit.py`** writes:
+**`temp.py`** writes:
 
 - `submission.csv` (repo root) — **leaderboard / finalist prediction file**
-- `outputs/submission.csv` — copy
-- `outputs/val_leaderboard.csv` — local validation scores
-- `outputs/final_model_record.json` — model card
-- `outputs/stage1_current_pm25.joblib`, `outputs/final_lgb_pass1.joblib`, `outputs/final_lgb_delta.joblib` — fitted models
+- `recursive_lightgbm_output/submission_recursive_lightgbm.csv` — copy
+- `recursive_lightgbm_output/recursive_predictions_with_state.csv` — per-row recursive state
+- `recursive_lightgbm_output/recursive_lightgbm_model.txt` — saved LightGBM booster
+- `recursive_lightgbm_output/metrics.json` — row counts, seed, hyperparameters
+
+**`fixed_model.py`** writes only `submission_fixed.csv` (comparison).
 
 ### Key dependencies / packages
 
-From `requirements.txt`:
+From `requirements.txt`: pandas, numpy, lightgbm, scikit-learn (`fixed_model.py` RMSE), matplotlib, jupyter, nbformat.
 
-- pandas, numpy, scikit-learn, lightgbm, matplotlib, joblib
-- holidays (optional; if missing, the holiday flag is 0)
-- jupyter, nbformat (to open the notebooks)
-
-XGBoost and CatBoost are **not** required for the submitted model.
-
-### Random seeds and locked settings
+### Random seeds and locked settings (`temp.py`)
 
 | Setting | Value |
 | --- | --- |
-| Primary seed | **42** |
-| Seed-bag | **42** and **2024** |
-| Ensemble | **0.75** seed-bag + **0.25** residual-on-proxy |
-| Stage-2 trees (full-train fit) | **800** |
-| Learning rate / leaves | 0.03 / 63 |
-| Sample weights | Sep–Feb ×1.8, heating season ×1.2, times `(1 + clip(y,0,400)/180)` |
-| Post-process | clip predictions to **[0, 999]** |
-| Dropped column | `year` (test includes 2017) |
-| Validation window | Sep 2015 – Feb 2016 (model selection / reporting only) |
+| seed / feature_fraction_seed / bagging_seed | **42** |
+| objective / metric | regression / RMSE |
+| learning_rate | **0.035** |
+| num_leaves | **63** |
+| min_data_in_leaf | **80** |
+| feature_fraction / bagging_fraction | 0.85 / 0.85 |
+| bagging_freq | 1 |
+| lambda_l2 | 1.0 |
+| num_boost_round | **900** |
+| target | `PM2_5_next_hour - current_PM2_5` (delta), added back at inference |
+| post-process | `max(0, current + delta)` |
+| lags | 1, 2, 3, 6, 12, 24 hours (kept only if the timestamp gap is exact) |
 
-`numpy.random.seed(42)` is also set in `02_Modelling.ipynb`.
+`fixed_model.py` (comparison): seed **42**; Model A 1200 rounds, Model B 1500 rounds; `learning_rate=0.02`, `num_leaves=255`, `max_depth=12`.
 
 ---
 
-## Pipeline (what produced the submitted file)
+## Pipeline (what produced `submission.csv`)
 
 ```
 data/train.csv, data/test.csv
-        ↓ interpolate_then_mean_fill (feature_engineering.py)
-        ↓ stage-1 current-PM2.5 proxy + spatial / lag features
-        ↓ LightGBM seed-bag + residual LightGBM
-        ↓ clip [0, 999], restore test id order
+        ↓ Data Cleaning.ipynb  →  train_cleaned.csv, test_cleaned.csv
+        ↓ canonicalize (timestamp, station_code, wind degrees)
+        ↓ LightGBM on delta = next-hour PM2.5 − current PM2.5
+        ↓ per-station recursive walk
+        ↓ max(0, ·), restore test id order
 submission.csv
 ```
 
-True `current_PM2_5` is never a stage-2 feature and is never written onto test.
-
-Processed tables are **not** stored. They are rebuilt in memory each run (item 4 of the expected materials: regenerate from code).
+True test `current_PM2_5` is never used. Recursive state is the model’s own previous prediction.
 
 ---
 
 ## Final model
 
-**0.75 × LightGBM seed-bag (seeds 42, 2024) + 0.25 × LightGBM residual around the stage-1 current-PM2.5 proxy.**
+**Recursive LightGBM delta** in `temp.py` (`lgb.train`, 900 rounds, seed 42). Full description: `Modelling.ipynb` §6–9.
 
-Local winter RMSE (Sep 2015 – Feb 2016): **25.57**. Full hyperparameters: `outputs/final_model_record.json`. Methodology: `02_Modelling.ipynb`.
+`fixed_model.py` is the alternative, not the leaderboard file.
 
 ---
 
@@ -108,26 +117,27 @@ Local winter RMSE (Sep 2015 – Feb 2016): **25.57**. Full hyperparameters: `out
 
 ```
 data/train.csv, data/test.csv     competition files
-feature_engineering.py            cleaning + features
-train_and_submit.py               train / val / submission.csv
-02_Modelling.ipynb                methodology report
-01_EDA.ipynb                      exploratory analysis (optional)
-Data Cleaning.ipynb               missing-value EDA (optional)
+Data Cleaning.ipynb               writes train_cleaned.csv / test_cleaned.csv
+data/train_cleaned.csv            cleaned train (used by EDA and modelling)
+data/test_cleaned.csv             cleaned test (no current_PM2_5)
+temp.py                           primary train / recursive inference / submission.csv
+fixed_model.py                    comparison hybrid A/B
+Modelling.ipynb                   methodology report
+EDA.ipynb                         exploratory analysis on the cleaned tables
 requirements.txt
 submission.csv                    leaderboard prediction file
-outputs/                          model card, val table, saved models
 ```
 
 ---
 
 ## Required disclosure
 
-- **External datasets:** none. Only competition `train.csv` / `test.csv`.
-- **External code / public solutions:** none copied. RH, wind u/v, heating-season dates, and pollutant lags are standard PM2.5 features, written here from scratch.
+- **External datasets:** none for fitting. Competition `data/train.csv` / `data/test.csv`, cleaned by `Data Cleaning.ipynb` to `train_cleaned.csv` / `test_cleaned.csv`. If `online.csv` is present, `temp.py` / `fixed_model.py` use it **after** inference to print a local RMSE; it is not a feature and is not written into recursive history.
+- **External code / public solutions:** none copied. Heating-season dates, wind u/v, and lagged PM2.5 are standard air-quality features, implemented in `temp.py` and `fixed_model.py`.
 - **Pretrained models:** none.
-- **AI tools:** Cursor Grok 4.6 was used to draft and edit code, notebooks, and this README.
-- **Manual modification of predictions:** none. `submission.csv` is clipped model output.
-- **Additional information:** optional `holidays` China calendar; PRSA Beijing station coordinates for inverse-distance features (not an extra concentration feed).
+- **AI tools:** Cursor Grok 4.6 was used to draft and edit the methodology notebook and this README so they match `temp.py` and `fixed_model.py`.
+- **Manual modification of predictions:** none. `temp.py` applies `max(0, ·)` only.
+- **Additional information:** none beyond the competition files (and optional local `online.csv` labels).
 
 ---
 
