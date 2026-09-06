@@ -1,2 +1,9 @@
 .venv/
 .DS_Store
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+data/train_cleaned.csv
+data/test_cleaned.csv
+data/train_featured.csv
+data/test_featured.csv

@@ -1,0 +1,60 @@
+/Users/yo/anaconda3/lib/python3.11/site-packages/pandas/core/arrays/masked.py:60: UserWarning: Pandas requires version '1.3.6' or newer of 'bottleneck' (version '1.3.5' currently installed).
+  from pandas.core import (
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+/Users/yo/anaconda3/lib/python3.11/site-packages/numpy/lib/nanfunctions.py:1215: RuntimeWarning: Mean of empty slice
+  return np.nanmean(a, axis, out=out, keepdims=keepdims)
+train (360954, 20) test (51063, 18) test has current_PM2_5 False
+
+================================================================
+Validation window: season_matched_Sep2015_Feb2016
+================================================================
+/Users/yo/Documents/GitHub/Inter-uni-Datathon-Beijing-Multi-Site-Air-Quality/feature_engineering.py:281: RuntimeWarning: Mean of empty slice
+  df["pm10_others_mean"] = np.nanmean(mat, axis=1)
+/Users/yo/Documents/GitHub/Inter-uni-Datathon-Beijing-Multi-Site-Air-Quality/feature_engineering.py:294: RuntimeWarning: Mean of empty slice
+  df["co_others_mean"] = np.nanmean(mat, axis=1)
+dev (257927, 194) val (51349, 194) n_features 189
+
+[season_matched_Sep2015_Feb2016] LightGBM seed-bag [42, 2024]
+  seed 42
+[250]	valid_0's l2: 674.588
+  seed 2024
+[250]	valid_0's l2: 677.069
+[season_matched_Sep2015_Feb2016] LightGBM residual around stage-1 proxy
+[250]	valid_0's l2: 671.313
+                         split                                model      rmse  best_iteration
+season_matched_Sep2015_Feb2016                          LGB seed 42 25.774592           361.0
+season_matched_Sep2015_Feb2016                        LGB seed 2024 25.782357           375.0
+season_matched_Sep2015_Feb2016                    LightGBM seed-bag 25.730283           368.0
+season_matched_Sep2015_Feb2016         LightGBM seed-bag + PM10 cap 25.738586             NaN
+season_matched_Sep2015_Feb2016           LightGBM residual-on-proxy 25.827007           324.0
+season_matched_Sep2015_Feb2016       Blend 0.75 bag + 0.25 residual 25.566988             NaN
+season_matched_Sep2015_Feb2016      Oracle persistence (ineligible) 22.414253             NaN
+season_matched_Sep2015_Feb2016 Stage-1 RMSE vs current (diagnostic) 22.445097             NaN
+season_matched_Sep2015_Feb2016           Stage-1 proxy as next-hour 30.386694             NaN
+
+Selected: Blend 0.75 bag + 0.25 residual RMSE 25.566988270740854 pm10_cap False
+/Users/yo/Documents/GitHub/Inter-uni-Datathon-Beijing-Multi-Site-Air-Quality/feature_engineering.py:281: RuntimeWarning: Mean of empty slice
+  df["pm10_others_mean"] = np.nanmean(mat, axis=1)
+/Users/yo/Documents/GitHub/Inter-uni-Datathon-Beijing-Multi-Site-Air-Quality/feature_engineering.py:294: RuntimeWarning: Mean of empty slice
+  df["co_others_mean"] = np.nanmean(mat, axis=1)
+Final seed 42 trees 800
+Final seed 2024 trees 800
+Final residual-on-proxy, trees 800
+Improved — wrote submission.csv (51063, 2)
