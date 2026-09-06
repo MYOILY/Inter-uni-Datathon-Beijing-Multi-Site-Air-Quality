@@ -135,10 +135,36 @@ def build_spatial_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.merge(spatial_pm, on='observation_timestamp', how='left')
     df['station_dispersion_from_city'] = df['current_PM2_5'] - df['city_pm25_mean']
 
+    # 4. City-wide mean and standard deviation at timestamp t
+    city_stats = df.groupby('observation_timestamp')['current_PM2_5'].agg(
+        city_mean='mean',
+        city_max='max',
+        city_min='min'
+    ).reset_index()
+
+    df = df.merge(city_stats, on='observation_timestamp', how='left')
+
+    # 2. Local vs. Regional divergence
+    df['pm25_to_city_mean_ratio'] = df['current_PM2_5'] / (df['city_mean'] + 1e-3)
+    df['pm25_city_diff'] = df['current_PM2_5'] - df['city_mean']
     return df
 
-df = pd.read_csv("train.csv")
-df = build_advanced_features(df)
-df = build_spatial_features(df)
-df.to_csv("train_featured.csv", index=False)
+train_df = pd.read_csv("train.csv")
+test_df = pd.read_csv("test.csv")
+
+# 1. Combine train and test into continuous timeline
+all_data = pd.concat([train_df, test_df], ignore_index=True)
+all_data['observation_timestamp'] = pd.to_datetime(all_data['observation_timestamp'])
+all_data = all_data.sort_values(['station', 'observation_timestamp']).reset_index(drop=True)
+
+# 2. Compute all features
+all_data = build_advanced_features(all_data)
+all_data = build_spatial_features(all_data)
+
+# 3. Split back using IDs
+train_features = all_data[all_data['id'].isin(train_df['id'])].copy()
+train_features.to_csv("train_featured.csv", index=False)
+test_features = all_data[all_data['id'].isin(test_df['id'])].copy()
+test_features.to_csv("test_featured.csv", index=False)
 print('Done')
+
